@@ -3,8 +3,8 @@
 # Unbanip from fail2ban jails , it will check your current ssh ip and it will clean that ip
 # from any jail , or will prompt you an option to insert an ip to clean
 # http://github.com/peterpt/server-admin-tools
-
 # function to recheck if ip was cleared from jail (both your/other ip)
+
 function checkunban () {
 chkjl=$(fail2ban-client status "$rdjl" | grep "$yourip")	
 if [[ -z "$chkjl" ]]
@@ -59,22 +59,70 @@ else
 echo "$yourip not found in $rdjl"
 fi
 done		
+exit 0
 }
+
+function multipleip () {
+echo "Choose witch  detected on ssh ip to unban"
+echo ""
+for ips in $(seq "$cntssh")
+do
+rdip=$(echo "$chkip" | sed -n ${ips}n)
+echo "$ips - $rdip"
+done
+echo ""
+echo -n "- Choose : "
+read -r opt
+if [[ "$opt" -le "$cntssh" ]]
+then
+yourip=$(echo "$chkip" | sed -n ${opt}p)
+jails
+else
+echo "Invalid option"
+sleep 3
+multipleip
+fi
+}
+
 
 
 # grabs your ip in case you are connected over ssh and cleans it from jails 
 function unbanyou () {
 echo -n "-Grabbing your ip ..."
-yourip=$(netstat -anp | grep "sshd" | grep "ESTABLISHED" | awk '{print$5}' | sed 's/:/ /' | awk '{print$1}')
-if [[ -z "$yourip" ]]
+cntssh=$(netstat -anp | grep "sshd" | grep "ESTABLISHED" | awk '{print$5}' | sed 's/:/ /' | awk '{print$1}' | wc -l )
+chkip=$(netstat -anp | grep "sshd" | grep "ESTABLISHED" | awk '{print$5}' | sed 's/:/ /' | awk '{print$1}')
+if [[ -z "$chkip" ]]
 then
 echo "Error"
 echo "Unable to get your ip from ssh connection"
 exit 0
-else
-echo "Done"
-echo "Your ip is : $yourip"
 fi
+if [[ "$cntssh" -gt "1" ]]
+then
+stip=$(echo "$chkip" | sed -n 1p)
+for i in $(seq "$cntssh")
+do
+if [[ "$i" != "1" ]]
+then
+rdip=$(echo "$chkip" | sed -n ${i}p)
+if [[ "$rdip" == "$stip" ]]
+then
+yourip="$stip"
+jails
+else
+multipleip
+fi
+fi
+done
+else
+yourip="$chkip"
+jails
+fi
+}
+
+function jails () {
+echo "Done"
+echo "IP : $yourip"
 echo "Checking Jails ..."
 jailc=$(fail2ban-client status | grep "Jail list" | sed -E 's/^[^:]+:[ \t]+//' | sed 's/,//g' | tr " " "\n" | wc -l)
 jailn=$(fail2ban-client status | grep "Jail list" | sed -E 's/^[^:]+:[ \t]+//' | sed 's/,//g' | tr " " "\n")
@@ -90,6 +138,7 @@ else
 echo "$yourip not found in $rdjl"
 fi
 done
+exit 0
 }
 clear
 echo "-----------Unban IP-----------"
@@ -115,4 +164,3 @@ exit 0
 else
 exit 0
 fi
-
