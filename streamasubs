@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# This script converts automatically every non utf-8 subtitles from streama to utf-8 in linux
+# https://github.com/peterpt/server-admin-tools
+
+
+green='\033[92m'
+white='\e[0;37m'
+yellow='\e[0;33m'
+orange='\e[38;5;166m'
+
+function dependencies () {
+echo -ne "$white-$green Checking dependencies$white ..."
+chklbc=$(apt-cache policy libc-bin | grep "Installed" | awk '{print$2}')
+if [[ "$chklm" == "(none)" ]]
+then
+      echo -e "$red""Error"
+      echo -e "$white""Iconv Missing"
+      echo ""
+      echo "Try : apt install libc-bin"
+exit 1
+fi
+echo -e "$green""Done"
+}
+
+function chkfile () {
+for i in $(seq "$cntfls")
+do
+fl=$(sed -n ${i}p /tmp/stremsrt.tmp)
+chkfl=$(file -bi "$dir/$fl" | awk '{print$2}' | sed 's/charset=//g')
+if [[ "$chkfl" != "utf-8" ]]
+then
+echo -ne "$orange""Converting :$white $dir/$fl$orange ..."
+if [[ "$chkfl" == "unknown-8bit" ]]
+then
+chkenc="windows-1252"
+else
+chkenc="$chkfl"
+fi
+iconv -f "$chkenc" -t utf-8 "$dir$fl" -o "/tmp/$fl" | tee -a /tmp/log.tmp
+if [[ ! -f "/tmp/$fl" ]]
+then
+echo -e "$red""Error"
+else
+echo -e "$green""Done"
+rm -rf "$dir/$fl" >/dev/null 2>&1
+mv "/tmp/$fl" "$dir/$fl" >/dev/null 2>&1
+chkutf=$(iconv -f utf-8 "$dir/$fl" -t utf-8 2>&1 >/dev/null )
+if [[ ! -z "$chkutf" ]]
+then
+echo -e "$green""Recheck :$white $dir/$fl$green -$red Failed$white"
+fi
+fi
+else
+echo -e "$orange""Subtitle :$white $dir/$fl$orange -$green already utf-8"
+fi
+done
+echo -e "$white"""
+exit 0
+}
+function banner () {
+echo -e "$white""-----$green Streama Subtitle UTF-8 Converter$white-----------------"
+echo -e "$white""-------------------------------------------------------"
+echo ""
+}
+
+function help () {
+echo -e "$white""-----$green Streama Subtitle UTF-8 Converter$white-----------------"
+echo -e "$white""-------------------------------------------------------"
+echo -e "$orange""Switches"
+echo -e "$white""-d $green (directory where streama srt files are located)"
+echo -e "$white""-h $green (this help)"
+echo ""
+echo -e "$orange""Example: $white streamasubs$green -d$white /streama/data/upload"
+echo ""
+exit 0
+}
+
+function start () {
+rm -f /tmp/stremsrt.tmp 2>&1 >/dev/null
+rm -f /tmp/*.srt 2>&1 >/dev/null
+shcfls=$(ls "$dir" | egrep '\.srt$' > /tmp/stremsrt.tmp)
+cntfls=$(wc -l /tmp/stremsrt.tmp | awk '{print$1}')
+if [[ "$cntfls" == "0" ]]
+then
+echo -e "$yellow""No srt files found in :$white $dir"
+exit 0
+else
+chkfile
+fi
+}
+
+clear
+var="$@"
+rdvar=$(echo "$var" | grep -w "\-d")
+if [[ ! -z "$rdvar" ]]
+then
+dir=$(echo "$var" | grep -oP '(?<=-d )[^ ]*')
+
+
+if [[ -z "$dir" ]]
+then
+banner
+echo -e "$green""No Input Directory Detected"
+sleep 5
+clear
+exit 0
+else
+if [[ ! -d "$dir" ]]
+then
+banner
+echo -e "$green""Directory$white $dir$green Does not Exit"
+sleep 5
+exit 0
+else
+banner
+dependencies
+start
+fi #dir not found
+fi # empty input with switch -d
+fi # switch -d detected
+rdvar=$(echo "$var" | grep -w "\-h")
+if [[ ! -z "$rdvar" ]]
+then
+clear
+help
+else
+clear
+help
+fi # -h switch
+
+
