@@ -7,3 +7,4 @@
 **Streamasubs** (Tool to automatically convert streama non utf-8 srt subtitles to utf-8 in linux)
 - Copy it to /usr/local/sbin folder and apply execution permissions chmod +x /usr/local/sbin/streamasubs
 - Streama is like a personal netflix service in your own server https://github.com/streamaserver/streama
+<img src="https://i.postimg.cc/4xtWk1Hz/streama.jpg">
