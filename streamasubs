@@ -37,7 +37,7 @@ chkenc="windows-1252"
 else
 chkenc="$chkfl"
 fi
-iconv -f "$chkenc" -t utf-8 "$dir$fl" -o "/tmp/$fl" | tee -a /tmp/log.tmp
+iconv -f "$chkenc" -t utf-8 "$dir/$fl" -o "/tmp/$fl" | tee -a /tmp/log.tmp
 if [[ ! -f "/tmp/$fl" ]]
 then
 echo -e "$red""Error"
