@@ -22,6 +22,7 @@
 - This tool requires a Manual tag with the line #BANNED in original firewall rules for it to work
   this tag is an identifier for the tool insert new banned ips after that tag , however the tool will
   inform you of this in case it does not find it .
+  
   <img src="https://i.postimg.cc/rFLCD7fy/firwall.jpg">
 
 ## Banned ips
@@ -29,14 +30,17 @@
   reload iptables firewall rules and will check if everything is ok , in case anything fails
   on reloading the firewall rules then it will automatically revert to your previous rules saved
   and will load those rules .
+  
   <img src="https://i.postimg.cc/pdYy11DC/bannedips.jpg">
 
   ## Log file
   - a log file is automatically created if an ip is banned , that log file is located in : /usr/local/share/banmail/banned.log
      , and will show you the ip that was banned and the reason why it was , next image shows a part of log file with email         bans , important data was retracted .
+    
   <img src="https://i.postimg.cc/sgRv3rDy/maillog.jpg">
 
   - This part of the log shows banned ips with invalid requests in to webserver , these ips were banned because a pattern was found in their requests on webserver that is configured in nginx.conf in /usr/local/share/banmail directory
+  - 
   <img src="https://i.postimg.cc/gJnYVYHC/weblog.jpg">
 
 
