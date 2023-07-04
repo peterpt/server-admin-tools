@@ -42,8 +42,10 @@
   - This part of the log shows banned ips with invalid requests in to webserver , these ips were banned because a pattern was found in their requests on webserver that is configured in nginx.conf in /usr/local/share/banmail directory
   - 
   <img src="https://i.postimg.cc/gJnYVYHC/weblog.jpg">
-
-
+## Requirements
+- iptables , dovecot , postfix , nginx or apache2 , nmap
+- (apt install iptables dovecot postfix nginx nmap)
+  
     ## Note : i did this tool for myself and uploaded to github for backup , do not expect much or any support on it in case you use it
 
     
