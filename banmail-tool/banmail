@@ -7,6 +7,7 @@
 # Banmail tool allows you to scan for these specific ports open on the banned ip : 22 , 80 , 443 , 8080 , 8443
 # These scans can only be made 1 time after the ips were banned , reason for this is to get an idea what type of server
 # exists on the other side in case http or https ports are opened serving webpages
+# A log file will be created of the scanned ips for future checking witch can be accessed using this tool option 7
 
 # This script requires iptables installed
 # In case your nginx or apache logs are not located in the precofigured paths on this script then change it to the proper location
