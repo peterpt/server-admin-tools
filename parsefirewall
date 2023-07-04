@@ -1,0 +1,88 @@
+#!/bin/bash
+tmpfile="/tmp/ips.tmp"
+rmip="/tmp/rmvips.tmp"
+firewall="/etc/firewall.rules"
+firewallbk="/etc/firewall.rules.bk"
+deltemp () {
+rm -rf "$tmpfile" > /dev/null 2>&1
+rm -rf "$rmip" > /dev/null 2>&1
+}
+deltemp
+echo "Checking Ip ranges in firewall"
+chkrg=$(cat "$firewall" | grep -w "INPUT" | grep -w "DROP" | grep "\-s" | awk '{print$4}' | sort | cut -d"." -f1-3)
+cat "$firewall" | grep -w "INPUT" | grep -w "DROP" | grep "\-s" | awk '{print$4}' | sort | cut -d"." -f1-3 | uniq > "$tmpfile"
+cntips=$(wc -l "$tmpfile" | awk '{print$1}')
+if [[ "$cntips" -ge "1" ]]
+then
+for i in $(seq "$cntips")
+do
+rdip=$(sed -n ${i}p "$tmpfile")
+nmbip=$(echo "$chkrg" | grep -c "$rdip" | awk '{print$1}') 
+if [[ "$nmbip" -ge "4" ]]
+then
+if [[ ! -f "$rmip" ]]
+then
+echo "$rdip   $nmbip" > "$rmip"
+else
+echo "$rdip   $nmbip" >> "$rmip"
+fi
+fi
+done
+fi
+if [[ ! -f "$rmip" ]]
+then
+echo "Nothing to be done for now"
+deltemp
+exit 0
+fi
+cntrmv=$(wc -l "$rmip" | awk '{print$1}')
+echo "Ips sequence to be removed from firewall and replaced by subnet /24"
+echo ""
+for ir in $(seq "$cntrmv")
+do
+rdip=$(sed -n ${ir}p "$rmip" | awk '{print$1}')
+rdcnt=$(sed -n ${ir}p "$rmip" | awk '{print$2}')
+echo "IP range : $rdip  | Single ips in that range : $rdcnt"
+done
+echo ""
+chkban=$(grep -w "\#BANNED" "$firewall")
+if [[ -z "$chkban" ]]
+then
+echo "Tag BANNED was not found in your firewall file"
+echo "That tag guides this util to place new subnets after it."
+deltemp
+exit 0
+fi
+echo -n "Do You want to continue ? (Y/N) : "
+read -r opt
+case "$opt" in
+Y|YES|yes|Yes|y)
+cp "$firewall" "$firewallbk"
+for cg in $(seq "$cntrmv")
+do
+rdip=$(sed -n ${cg}p "$rmip" | awk '{print$1}')
+sed -i "/$rdip/d" "$firewall"
+sed -i "/#BANNED/a -A INPUT -s $rdip.0/24 -j DROP" "$firewall"
+done
+iptables-restore "$firewall"
+echo "Done"
+deltemp
+exit 0
+;;
+N|n|NO|No|no)
+deltemp
+exit 0
+;;
+*)
+deltemp
+exit 0
+;;
+esac
+deltemp
+echo "Done"
+exit 0
+
+
+
+
+
