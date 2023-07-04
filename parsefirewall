@@ -1,11 +1,30 @@
 #!/bin/bash
+
+# Parse firewall
+# instead having a firewall rules file with hundreds of ips to load , this util checks on firewall rules for the number
+# of identical ips from same subnet , and in case it finds more that a specific amount then will ban the 255 ips from that subnet
+# with 0/24 on firewall and will delete those unique ips from that subnet on the firewall rules file
+
+# example : on running this script if it finds these ips banned : 185.234.5.34,185.234.5.100,185.234.5.145,185.234.5.3,185.234.5.20
+# it will delete the lines from firewall where those ips are and will place a drop rule for the whole subnet , like : 185.234.5.0/24
+# This way every ip from 185.234.5.0 - 185.234.5.255  will be banned automatically
+
+# the number of matched ips to ban can be configured here in (mtch) variable witch is set for 5
+
+# your firewall rules file location must be set on this script
+# IT REQUIRES IPTABLES INSTALLED
+# Script build by peterpt
+# https://github.com/peterpt/server-admin-tools
+
 tmpfile="/tmp/ips.tmp"
 rmip="/tmp/rmvips.tmp"
-firewall="/etc/firewall.rules"
+firewall="your firewall rules location" # <- configure here your firewall rules file location
 firewallbk="/etc/firewall.rules.bk"
 deltemp () {
 rm -rf "$tmpfile" > /dev/null 2>&1
 rm -rf "$rmip" > /dev/null 2>&1
+mtch="5" # Number of identical ips on same subnet to match 
+
 }
 deltemp
 echo "Checking Ip ranges in firewall"
@@ -18,7 +37,7 @@ for i in $(seq "$cntips")
 do
 rdip=$(sed -n ${i}p "$tmpfile")
 nmbip=$(echo "$chkrg" | grep -c "$rdip" | awk '{print$1}') 
-if [[ "$nmbip" -ge "4" ]]
+if [[ "$nmbip" -ge "$mtch" ]]
 then
 if [[ ! -f "$rmip" ]]
 then
