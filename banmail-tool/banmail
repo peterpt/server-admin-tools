@@ -1,4 +1,18 @@
 #!/bin/bash
+#Banmail will search for specific patterns on mail logs and webserver logs and will ban those ips directly 
+# in firewall rules files with the Rule DROP , patterns for banning ips on mail logs and webserver logs are :
+# mail invalid patterns : SSL routines | SSL routines | SSL routines
+# Nginx / Apache invalid patterns to search can be found in file nginx.conf in this git
+
+# Banmail tool allows you to scan for these specific ports open on the banned ip : 22 , 80 , 443 , 8080 , 8443
+# These scans can only be made 1 time after the ips were banned , reason for this is to get an idea what type of server
+# exists on the other side in case http or https ports are opened serving webpages
+
+# This script requires iptables installed
+# In case your nginx or apache logs are not located in the precofigured paths on this script then change it to the proper location
+# You firewall rules file location must be set on this script , your firewall rules must be working in iptables
+
+# Denveloped by peterpt at https://github.com/peterpt/server-admin-tools
 
 green='\033[92m'
 white='\e[0;37m'
