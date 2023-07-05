@@ -314,6 +314,7 @@ echo -e "$orange""4 -$white Show Log File"
 echo -e "$orange""5 -$white Restore Original Firewall Rules"
 echo -e "$orange""6 -$white Search for pattern in logfile"
 echo -e "$orange""7 -$white Find Ports 22,80,443,8080,8443 open in banned ips"
+echo -e "$orange""8 -$white Exit"
 echo ""
 echo -ne "$white""Choose : "
 read -r opt
@@ -520,6 +521,9 @@ fi
 else
 startscan
 fi
+;;
+8)
+exit 0
 ;;
 *)
 exit 0
