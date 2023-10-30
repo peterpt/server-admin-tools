@@ -1,0 +1,644 @@
+#!/bin/bash
+
+green='\033[92m'
+white='\e[0;37m'
+yellow='\e[0;33m'
+orange='\e[38;5;166m'
+red='\e[0;31m'
+
+#logs
+installdir="/usr/local/share/banmail"
+if [[ ! -d "$installdir" ]]
+then
+mkdir -p "$installdir"
+fi
+iface=$(route | grep '^default' | grep -o '[^ ]*$')
+locapip=$(ifconfig $iface | grep "inet" | awk '{print$2}' | sed -n 1p | sed  's/^[t ]*//g;s/[t ]*$//g')
+fwcp="0"
+logfile="$installdir/banned.log" # Log File were all ips banned will be logged with their entries on logs
+logsearch=$installdir/banned.*
+scanlog="$installdir/scanned.log"
+webconf="$installdir/nginx.conf" # Patterns to search in nginx logs , this can be changed according to what you need
+firewall="Here" # your firewall rules file
+firebackup="/etc/firewall.rules.bk" #  backup of your firewall rules before changes (this is doing automatically)
+firstbackup="/etc/firewall.rules.firstbackup" # First backup will never be changed , it is just a security for future in case you need it
+lognginx="/var/log/nginx/access.log" # Nginx or apache web log file location
+lognginx1="/var/log/nginx/access.log.1" 
+logimap="/var/log/dovecot/imap.log" # Dovecot imap log
+logpop3="/var/log/dovecot/pop3.log" # Dovecot pop3 log
+tmpfile="/tmp/webban.tmp" # temporary file to align all detected ips in nginx log
+
+if [ -f "$lognginx" ] && [ -f "$lognginx1" ] # check if access.log and access.log.1 (from last day) exists and use both
+then
+weblog="$lognginx $lognginx1"
+elif [ -f "$lognginx" ] && [ ! -f "$lognginx1" ] # Only access.log file was found
+then
+weblog="$lognginx"
+fi
+ctrlip=""
+
+# Nginx lookup log start
+weblog () {
+if [[ ! -f "$webconf" ]]
+then
+echo -e "$red""Error :$white No Nginx configuration patterns found"
+exit 0
+fi
+rdngcf=$(wc -l "$webconf" | awk '{print$1}')
+rm -rf "$tmpfile" > /dev/null 2>&1
+echo ""
+echo -e "$green""<$orange ------$white Starting Webserver Bad Requests Check$orange ------$green >"
+echo ""
+for i in $(seq $rdngcf)
+do	
+rdpatt=$(sed -n ${i}p "$webconf" | awk '{print$1}')
+if [[ ! -z "$rdpatt" ]] # avoid empty lines in log
+then
+ipsweb=$(grep -w -h "$rdpatt" $weblog | awk '{print$1}')
+if [[ ! -z "$ipsweb" ]] #Found pattern in weblog
+then
+
+if [[ ! -f "$tmpfile" ]] # temporary file with all ips that use config patterns
+then
+echo "$ipsweb" > "$tmpfile"
+else
+echo "$ipsweb" >> "$tmpfile"
+fi
+fi
+fi
+done	
+if [[ ! -f "$tmpfile" ]]
+then
+echo -e "$green""No new ips to add$white"
+exit 0
+fi
+cat "$tmpfile" | uniq > /tmp/web.tmp
+rm -rf "$tmpfile" > /dev/null 2>&1
+mv /tmp/web.tmp "$tmpfile"
+
+cntips=$(wc -l "$tmpfile" | awk '{print$1}')
+if [[  "$cntips" != "0" ]] # There is at least 1 ip that was detected
+then
+for ips in $(seq $cntips)
+do
+ip=$(sed -n ${ips}p "$tmpfile")
+ipparse=$(echo "$ip" | cut -d"." -f1-3)
+subip="$ipparse.0/24"
+schsub=$(grep -w "$subip" "$firewall")
+if [[ -z "$schsub" ]]
+then
+schip=$(grep -w "$ip" "$firewall")
+echo -ne "$white""-$orange Searching$green $ip$orange in firewall ... "
+if [[ -z "$schip" ]] # Search each ip in firewall for duplicates (in case log file did not yet rotated)
+        then
+echo -e "$green""Not Found"
+        gthst=$(dig -x $ip +short)
+        
+if [[ "$fwcp" == "0" ]] # check if firewall file was already backed up
+then
+echo -e "$white""-$orange Making a backup of your current firewall Rules ..."
+cp "$firewall" "$firebackup"
+echo -e "$green""Done"
+fwcp="1"
+fi
+
+ if [[ -z "$gthst" ]] # in case ip was not resolved to hostname (log purposes)
+         then
+         gthst="Unable To Resolve"
+         fi
+
+echo -ne "$white""-$orange Retrieving all data from$green $ip$orange from logs ... "
+        replog=$(grep -w -h "$ip" $weblog)
+        echo -e "$green""Done"
+        echo -ne "$white""-$orange Adding$green $ip$orange to  firewall rule & log file ..."
+if [[ ! -f "$logfile" ]] # check if log file exists
+then
+echo "---------------------Banned IPS in iptables from banmail---------------------" > "$logfile"
+echo "IP : $ip   | Domain : $gthst" >> "$logfile"
+echo "                        Invalid Log Detections" >> "$logfile"
+echo "$replog" >> "$logfile"
+else
+echo "-----------------------------------------------------------------------------" >> "$logfile"
+echo "IP : $ip   | Domain : $gthst" >> "$logfile"
+echo "                        Invalid Log Detections" >> "$logfile"
+echo "$replog" >> "$logfile"
+fi
+if [[ -z "$ctrlip" ]] # control ip to check later when firewall rules reload
+then
+ctrlip="$ip"
+fi
+sed -i "/#BANNED/a -A INPUT -s $ip -j DROP" $firewall
+#sed -i "/#BANNED/a \#Domain for $rdip ($gthst)" $firewall
+echo -e "$green""Done"                  
+else
+                 echo -e "$green""Already in firewall"
+                   fi
+else
+echo -ne "$white""-$orange Searching$green $ip$orange in firewall ... "
+echo -e "$green""Subnet in firewall"
+fi
+done
+else
+echo -e "$green""No new ips to add$white"
+fi
+echo ""
+if [[ "$fwcp" == "1" ]] # Check if firewall was backed up
+then
+# Reload Firewall rules and check if everything is ok
+echo -ne "$white""-$green Applying Firewall Rules ... "
+iptables-restore "$firewall"
+echo "Done"
+echo -ne "$white""-$green Checking if new Firewall Rules are ok ... "
+iptables-save > /tmp/iptables.tmp
+chkfire=$(grep "$ctrlip" /tmp/iptables.tmp)
+if [[ -z "$chkfire" ]] # confirmation that control ip was found in new reload of firewall
+then
+echo -e "$red""Error"
+echo -e "$white""-$orange Current running firewall rules do not match" 
+echo -ne "$green""Reactivating Previous firewall rules ... "
+cp "$firebackup" "$firewall"
+iptables-restore "$firewall"
+echo "Done"
+rm -rf /tmp/iptables.tmp > /dev/null 2>&1
+echo -e "$green""Finished$white"
+exit 0
+else
+echo -e "$green""Done"
+echo ""
+if [[ -f "$logfile" ]] # check for logfile
+then
+echo -e "$white""A Log File was created in$green $logfile$white with detailed"
+echo "information about any banned ips and what was the reason to ban them"
+fi
+echo ""
+echo -e "$green""Finished$white"
+exit 0
+fi
+else
+if [[ -f "$logfile" ]] # check for logfile
+then
+echo -e "$white""A Log File was created in$green $logfile$white with detailed"
+echo "information about any banned ips and what was the reason to ban them"
+fi
+echo ""
+echo -e "$green""Finished$white"
+exit 0	
+fi
+
+
+
+}
+
+startscan () {
+grep -w "IP :" $logsearch | awk '{print$3}' > /tmp/tempips.tmp
+cntip=$(wc -l /tmp/tempips.tmp | awk '{print$1}')
+for ips in $(seq "$cntip")
+do
+readip=$(sed -n ${ips}p /tmp/tempips.tmp)
+if [[ -f "$scanlog" ]]
+then
+schip=$(grep -w "$readip" "$scanlog")
+if [[ -z "$schip" ]]
+then
+scan
+fi
+else
+scan
+fi
+done
+}
+
+
+scan () {
+echo -ne "$white""-$orange Scanning$green $readip$orange for open ports$white 22$orange ,$white 80$orange ,$white 443$orange ,$white 8080$orange ,$white 8443$orange : "
+scanrt=$(nmap -Pn -p 22,80,8080,443,8443 $readip | grep "open")
+if [[ ! -z "$scanrt" ]]
+then
+echo -e "$green""Port/s Open"
+if [[ ! -f "$scanlog" ]]
+then
+echo "------------Banned Ips Scan Results--------------" > "$scanlog"
+echo "IP : $readip" >> "$scanlog"
+scanrt=$(echo "$scanrt" | sed 's/\/tcp/ /g')
+echo "$scanrt" >> "$scanlog"
+echo "-------------------------------------------------" >> "$scanlog"
+else
+echo "IP : $readip" >> "$scanlog"
+scanrt=$(echo "$scanrt" | sed 's/\/tcp/ /g')
+echo "$scanrt" >> "$scanlog"
+echo "-------------------------------------------------" >> "$scanlog"
+fi
+else
+if [[ ! -f "$scanlog" ]]
+then
+echo "------------Banned Ips Scan Results--------------" > "$scanlog"
+echo "IP : $readip" >> "$scanlog"
+echo "All Ports Closed/Filtered" >> "$scanlog"
+echo "-------------------------------------------------" >> "$scanlog"
+else
+echo "IP : $readip" >> "$scanlog"
+echo "All Ports Closed/Filtered" >> "$scanlog"
+echo "-------------------------------------------------" >> "$scanlog"
+fi
+echo -e "$red""Port/s Closed/Filtered"
+fi
+}
+
+if [[ ! -f "$firewall" ]] # check if firewall rules file exist
+then
+echo -e "$red""Error$white :$green No Firewall rules file found / Configured$white"
+echo ""
+echo -e "$green""Make sure your firewall rules path location are correctly configured inside this script$white"
+exit 0
+else
+getln=$(grep "#BANNED" "$firewall")
+if [[ -z "$getln" ]] # check if tag (#BANNED) exists in firewall file 
+then
+echo -e "$red""Error :$white your firewall rules does not have the tag #BANNED in it"
+echo "This tagg #BANNED and #ENDBANNED allow this tool to insert new banned ips after that tag"
+echo "in iptables and not in any random place"
+echo ""
+echo "#BANNED tag should be placed manually by you in your file"
+echo "Example to where should be placed :"
+echo -e "$green"""
+echo "# Generated by iptables-save v1.8.7 "
+echo "*filter"
+echo ":INPUT ACCEPT [0:0]"
+echo ":FORWARD DROP [0:0]"
+echo ":OUTPUT ACCEPT [3671:1347987]"
+echo "-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+echo "#BANNED"
+echo "-A INPUT -s 224.0.0.0/3 -j DROP"
+echo "-A INPUT -s 240.0.0.0/5 -j DROP"
+echo "#ENDBANNED"
+echo ""
+echo -e "$white""#ENDBANNED tag is not needed but it sould be written in your firewall to guide"
+echo "you manually where all banned ips are placed"
+echo ""
+echo "Without this tag #BANNED this tool does not work and without this tag been placed"
+echo "in the right place then it could probably not be effective"
+echo ""
+exit 0
+else
+if [[ ! -f "$firstbackup" ]] # create first run backup of firewall rules
+then
+cp "$firewall" "$firstbackup"
+fi
+fi
+fi
+if [[ ! -f "$logimap" ]] # check if imap log exists
+then
+echo -e "$red""Error$white :$green No dovecot imap log file found / Configured$white"
+echo ""
+echo -e "$green""Make sure your dovecot is running or log paths location are correctly configured inside this script$white"
+exit 0
+elif [[ ! -f "$logpop3" ]] # check if pop3 log exists
+then
+echo -e "$red""Error$white :$green No Dovecot pop3 log file found / Configured$white"
+echo ""
+echo -e "$green""Make sure your dovecot is running or log paths location are correctly configured inside this script$white"
+exit 0
+elif [[ ! -f "$lognginx" ]] # check if apache2/nginx log exists
+then
+echo -e "$red""Error$white :$green No Nginx Access log file found / Configured"
+echo ""
+echo -e "$green""Make sure your webserver is running or log paths location are correctly configured inside this script$white"
+exit 0
+fi
+
+cleanlog () {
+shcvar=$(grep -n "$rdvar" /tmp/weberrors.tmp | tr ":" " " | awk '{print$1}' | wc -l)
+lines=$(grep -n "$rdvar" /tmp/weberrors.tmp | tr ":" " " | awk '{print$1}')
+for rln in $(seq "$shcvar")
+do
+gtln=$(echo "$lines" | sed -n ${rln}p) 
+sed -i "${gtln}d" /tmp/weberrors.tmp
+done
+}
+estcon () {
+clear
+echo -e "$red""PRESS$white CTRL + C$red to Exit$white"
+chkcon=$(netstat -anp | grep "ESTABLISHED" | grep -v -E "127.0.0.1" | tr ":" " " | tr "/" " ")
+echo -e "$green""------------Established Connections---------------"
+cntln=$(echo "$chkcon" | wc -l | awk '{print$1}')
+for i in $(seq $cntln)
+do
+conip=$(echo "$chkcon" | sed -n ${i}p | awk '{print$4}' | sed  's/^[t ]*//g;s/[t ]*$//g')
+rdsv=$(echo "$chkcon" | sed -n ${i}p | awk '{print$10}')
+toip=$(echo "$chkcon" | sed -n ${i}p | awk '{print$6}' | sed  's/^[t ]*//g;s/[t ]*$//g' )
+if [[ "$conip" == "$localip" ]]
+then
+conip="Local Server"
+fi
+if [[ "$toip" == "$localip" ]]
+then
+conip="Local Server"
+fi
+if [[ "$rdsv" == "sshd" ]]
+then
+rdsv="Secure Shell"
+elif [[ "$rdsv" == "nginx" ]]
+then
+rdsv="Webserver"
+elif [[ "$rdsv" == "amavisd" ]]
+then
+rdsv="Mail Filter"
+fi
+
+echo -e "$white""$conip$orange is connected to$white $toip$orange using$white $rdsv"
+done
+echo -e "$green""--------------------------------------------------$white"
+sleep 1
+estcon
+}
+
+echo -e "$green""--------------------------------------------------"
+echo -e "$green""--$white          Log file IP Ban Tool$green                --"
+echo -e "$green""--------------------------------------------------"
+echo ""
+echo -e "$green""Select one of the options"
+echo -e "$orange""1 -$white Continue With Normal Procedure"
+echo -e "$orange""2 -$white Search Ip In Firewall"
+echo -e "$orange""3 -$white Search ip in logs"
+echo -e "$orange""4 -$white Show Log File"
+echo -e "$orange""5 -$white Restore Original Firewall Rules"
+echo -e "$orange""6 -$white Search for pattern in logfile"
+echo -e "$orange""7 -$white Find Ports 22,80,443,8080,8443 open in banned ips"
+echo -e "$orange""8 -$white Add Pattern to Web Patterns File"
+echo -e "$orange""9 -$white Check 404 & 403 Errors in Weblogs"
+echo -e "$orange""10 -$white Check Established Connections"
+echo -e "$orange""11 -$white Exit"
+echo ""
+echo -ne "$white""Choose : "
+read -r opt
+case $opt in
+1)
+echo ""
+echo -e "$green""<$orange ---------$white Email Server Log Files Check$orange -----------$green >"
+# Matches for illegal connections to mail server
+ipsmail=$(grep -we "SSL routines" -we "Too many bad commands" -we "Connection reset by peer" "$logimap" "$logpop3" | sed 's/.*rip=//; s/,.*//' | uniq )
+cntips=$(echo "$ipsmail" | wc -l | awk '{print$1}')
+
+
+                     if [[ "$cntips" != "0" ]] # check mail log for anomalies , key words : SSL routines , Too many bad commands , Connection reset by peer
+                     then
+                     
+                     for i in $(seq $cntips)
+                     do
+                     ip=$(echo "$ipsmail" | sed -n ${i}p)
+                     ipparse=$(echo "$ip" | cut -d"." -f1-3)
+subip="$ipparse.0/24"
+schsub=$(grep -w "$subip" "$firewall")
+if [[ -z "$schsub" ]]
+then
+                     echo -ne "$white""-$orange Searching$green $ip$orange in firewall ... "                     
+                     schip=$(grep -w "$ip" "$firewall")
+    
+        if [[ -z "$schip" ]] # search each ip detected in firewall rules
+        then
+echo -e "$green""Not Found"
+if [[ "$fwcp" == "0" ]] # check if firewall file was backed up
+then
+echo -ne "$white""-$orange Making a backup of your current firewall Rules ..."
+cp "$firewall" "$firebackup"
+echo -e "$green""Done"
+fwcp="1"
+fi
+
+       
+       gthst=$(dig -x $ip +short)
+         
+         if [[ -z "$gthst" ]] # resolve ip to hostname (log purposes)
+         then
+         gthst="Unable To Resolve"
+        fi
+        echo -ne "$white""-$orange Retrieving all data from$green $ip$orange from logs ..."
+        replog=$(grep -w "$ip" "$logimap" "$logpop3")
+        echo -e "$green""Done"       
+        echo -ne "$white""-$orange Adding$green $ip$orange to  firewall rule & log file ..."
+if [[ ! -f "$logfile" ]] # check for log file
+then
+echo "---------------------Banned IPS in iptables from banmail---------------------" > "$logfile"
+echo "IP : $ip   | Domain : $gthst" >> "$logfile"
+echo "                        Invalid Log Detections" >> "$logfile"
+echo "$replog" >> "$logfile"
+else
+echo "-----------------------------------------------------------------------------" >> "$logfile"
+echo "IP : $ip   | Domain : $gthst" >> "$logfile"
+echo "                        Invalid Log Detections" >> "$logfile"
+echo "$replog" >> "$logfile"
+fi
+if [[ -z "$ctrlip" ]] # control ip to check later when firewall rules reload
+then
+ctrlip="$ip"
+fi
+sed -i "/#BANNED/a -A INPUT -s $ip -j DROP" $firewall
+#sed -i "/#BANNED/a \#Domain for $ip ($gthst)" $firewall
+echo -e "$green""Done"
+                  else
+                 echo -e "$green""Already in firewall"
+                   fi
+else
+echo -ne "$white""-$orange Searching$green $ip$orange in firewall ... "
+echo -e "$green""Subnet in firewall"
+fi
+done
+weblog
+                    else
+                    echo -e "$green""No anomalies detected in mail logs or ips already in firewall"
+                    weblog
+                    fi
+;;
+2)
+echo ""
+echo "Please write the ip to search in firewall"
+echo -n "IP : "
+read -r sip
+ship=$(grep -w "$sip" "$firewall")
+if [[ -z "$ship" ]] # check ip in firewall
+then
+echo "No results for : $sip were found in firewall"
+exit 0
+else
+echo "$sip exists in firewall"
+fi
+exit 0
+;;
+3)
+echo ""
+echo "Please write the ip to search in log file"
+echo -n "IP : "
+read -r sip
+ship=$(grep -w "$sip" $logsearch) # search ip in logfile
+if [[ -z "$ship" ]]
+then
+echo "No results for : $sip were found in firewall"
+exit 0
+else
+echo -e "$green""$sip exists in log file"
+echo -e "$green""---------------------------------------------------$white"
+cat "$logfile" | grep -w "$sip"
+echo -e "$green""---------------------------------------------------"
+fi
+exit 0
+;;
+4)
+echo ""
+echo -e "$green""------------------------Current Log file---------------------------$white"
+cat "$logfile"
+echo -e "$green""-------------------------------------------------------------------$white"
+exit 0
+;;
+5)
+echo ""
+if [[ ! -f "$firstbackup" ]] # search for first backup of firewall rules
+then
+echo -e "$red""Error :$white orignal firewall rules were not found in : $firstbackup"
+echo ""
+exit 0
+fi 
+echo -ne "$green""Are you Sure you want to restore orgininal firewall rules ? (Y/N) : "
+read -r opt
+if [[ "$opt" == @(Y|y|Yes|YES) ]]
+then
+cp "$firstbackup" "$firewall"
+iptables-restore "$firewall"
+if [[ -f "$logfile" ]] # check for logfile
+then
+> "$logfile" # Clean log file
+fi 
+echo ""
+echo -e "$green""Firewall rules were original restored and reloaded , they are in effect now"
+echo ""
+exit 0
+else
+exit 0
+fi
+;;
+6)
+echo ""
+if [[ ! -f "$logfile" ]]
+then
+echo -e "$green""Logfile not found or not yet created$white"
+exit 0
+fi
+echo -e "$orange""Write a pattern to search in logfile"
+echo -ne "$green""Pattern :$white"
+read -r rdpat
+if [[ -z "$rdpat" ]]
+then
+echo ""
+echo -e "$green""Empty input$white"
+exit 0
+fi
+schpt=$(grep -w "$rdpat" "$logfile")
+if [[ -z "$schpt" ]]
+then
+echo -e "$orange""No results were found matching$white $rdpat$orange in logfile$white"
+exit 0
+else
+echo ""
+echo -e "$green""---------------- Results found for$white $rdpat $green in logfile -------------$white"
+cat "$logfile" | grep -w "$rdpat"
+echo -e "$green""-----------------------------------------------------------------------$white"
+exit 0
+fi
+ 
+;;
+7)
+if [[ -f "$scanlog" ]]
+then
+echo -e "$green""Scan Log Found"
+echo -e "$white""Choose one of the options"
+echo -e "$white""1 -$green Open Scanned Log"
+echo -e "$white""2 -$green Continue to Scan"
+echo ""
+echo -ne "$green""Choose One of the options :$white "
+read -r opt
+if [[ "$opt" == "1" ]]
+then
+clear
+cat "$scanlog"
+echo ""
+exit 0
+elif [[ "$opt" == "2" ]]
+then
+startscan
+echo ""
+echo -e "$white""Finished"
+echo -e "$green""Scan Log can be found in$white $scanlog"
+exit 0
+else
+echo -e "red""Invalid Option"
+exit 0
+fi
+else
+startscan
+fi
+;;
+8)
+echo ""
+echo -e "$green""Write pattern to write in nginx.conf file"
+echo -ne "$orange""Pattern :$white "
+read -r patt
+if [[ -z "$patt" ]]
+then
+echo -e "$red""Empty Input$white"
+echo ""
+exit 0
+else
+echo "$patt" >> "$webconf"
+chkpat=$(echo "$patt" | awk '{print$1}')
+chkpat=$(grep "$patt" "$webconf")
+if [[ ! -z "$chkpat" ]]
+then
+echo -e "$green""Done$white"
+exit 0
+else
+echo -e "$red""Error$white"
+exit 0
+fi
+fi
+;;
+9)
+clear
+echo -ne "$orange""Collecting$white 404$orange &$white 403$orange errors from webserver logs ..."
+grep "404" $weblog | awk '{print$7}' > /tmp/error.tmp
+grep "403" $weblog | awk '{print$7}' >> /tmp/error.tmp
+cat /tmp/error.tmp | uniq > /tmp/weberrors.tmp
+cntpat=$(wc -l "$webconf" | awk '{print$1}')
+for i in $(seq "$cntpat")
+do
+rdvar=$(sed -n ${i}p "$webconf" | awk '{print$1}')
+shcvar=$(grep -n "$rdvar" /tmp/weberrors.tmp)
+if [[ ! -z "$shcvar" ]]
+then
+shcvar=$(grep -n "$rdvar" /tmp/weberrors.tmp | tr ":" " " | awk '{print$1}' | wc -l)
+if [[ "$shcvar" -gt "1" ]]
+then
+cleanlog
+elif [[ "$shcvar" == "1" ]]
+then
+shcvar=$(grep -n "$rdvar" /tmp/weberrors.tmp | tr ":" " " | awk '{print$1}')
+sed -i "${shcvar}d" /tmp/weberrors.tmp
+fi
+fi
+done
+echo -e "$green""Done"
+echo -e "$green""--------------404 & 403 Errors Found---------------$white"
+cat /tmp/weberrors.tmp
+echo -e "$green""---------------------------------------------------$white"
+exit 0
+;;
+10)
+clear
+estcon
+exit 0
+;;
+11)
+exit 0
+;;
+*)
+exit 0
+;;
+esac
