@@ -26,7 +26,7 @@
   <img src="https://i.postimg.cc/rFLCD7fy/firwall.jpg">
 
 ## Tool interface menu
- <img src="https://i.postimg.cc/J4kJptrx/menu.jpg">
+ <img src="https://i.postimg.cc/43kzXZwh/banmail.jpg">
 
 ## Banned ips
 - Next image will show how it works , after adding the new banned ips to firewall rules it will
